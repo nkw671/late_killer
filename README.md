@@ -63,6 +63,9 @@
 <img width="832" height="311" alt="Image" src="https://github.com/user-attachments/assets/ceb2a5cd-a67b-498c-8a37-f75e3b04c743" />
 
 # 클래스 다이어그램(패턴 적용)
+<br>
+버스 도착시간이 업데이트 될때마다 여러 클래스가 영향을 받으므로 옵저버 패턴을 적용했습니다.
+<br>
 # 시퀀스 다이어그램
 # 코딩
 # 응집 / 결합 / Solid 분석
