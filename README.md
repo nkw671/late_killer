@@ -34,31 +34,7 @@
 | P2 중요 | 전체 기능에는 영향을 미치지 않지만 사용성에 지장을 주는 요구사항 |
 | P3 선택 | 사용자 기호 편의기능 |
 
-# 🚌 LateKiller
-
-버스 도착 시간에 맞춰 **지금 출발해야 하는 순간**을 알려주는 Android/iOS 알람 앱입니다.
-
----
-
-## 목차
-
-- [주요 기능](#주요-기능)
-- [요구사항 명세 (SRS)](#요구사항-명세-srs)
-- [우선순위 범례](#우선순위-범례)
-
----
-
-## 주요 기능
-
-- 정류장을 이름 또는 번호로 검색하고 즐겨찾기 등록
-- 선택한 정류장을 경유하는 버스 노선 조회 및 알람 설정
-- 도보 소요 시간을 고려하여 **정확한 출발 타이밍** 알림
-- TTS(음성)로 노선 번호 및 남은 시간 안내
-- 잠금화면 및 플로팅 UI를 통한 실시간 도착 정보 표시
-
----
-
-## 요구사항 명세 (SRS)
+------
 
 | ID | 분류 | 요구사항 | 우선순위 | 테스트 기준 |
 |----|------|----------|----------|-------------|
@@ -108,6 +84,14 @@
 <img width="1385" height="1993" alt="Image" src="https://github.com/user-attachments/assets/5acc77cf-b59f-4b20-9fd2-fc2cffb8fcb5" />
 <br>
 
+# UI 프로토타입
+
+<br>
+<img width="475" height="856" alt="Image" src="https://github.com/user-attachments/assets/8a956c86-c09b-4341-85c9-cf560a54c39a" />
+<br>
+
+<img width="533" height="1056" alt="Image" src="https://github.com/user-attachments/assets/bea07a31-e96a-4879-afbf-d7596b851dc2" />
+<Br>
 # 코딩
 # 응집 / 결합 / Solid 분석
 # 품질 분석
