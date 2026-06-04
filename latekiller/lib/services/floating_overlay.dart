@@ -8,13 +8,28 @@ class FloatingOverlay {
   FloatingOverlay._();
 
   bool _active = false;
+  bool _permissionAsked = false;
+
+  /// 알람 시작 시 미리 호출 — 권한 다이얼로그를 포그라운드에서 띄운다.
+  /// 백그라운드 전환 후엔 시스템이 다이얼로그를 띄울 수 없어 show()가 실패한다.
+  Future<bool> ensurePermission() async {
+    final granted = await FlutterOverlayWindow.isPermissionGranted();
+    if (granted) return true;
+    if (_permissionAsked) return false;
+    _permissionAsked = true;
+    final ok = await FlutterOverlayWindow.requestPermission();
+    return ok == true;
+  }
 
   Future<void> show() async {
     if (_active) return;
+    // 권한 체크만 (요청은 ensurePermission이 처리)
     final granted = await FlutterOverlayWindow.isPermissionGranted();
-    if (!granted) {
-      final ok = await FlutterOverlayWindow.requestPermission();
-      if (ok != true) return;
+    if (!granted) return;
+    final isActive = await FlutterOverlayWindow.isActive();
+    if (isActive == true) {
+      _active = true;
+      return;
     }
     await FlutterOverlayWindow.showOverlay(
       enableDrag: true,
@@ -23,8 +38,8 @@ class FloatingOverlay {
       flag: OverlayFlag.defaultFlag,
       visibility: NotificationVisibility.visibilityPublic,
       positionGravity: PositionGravity.auto,
-      height: 180,
-      width: 360,
+      height: 260,
+      width: WindowSize.matchParent,
     );
     _active = true;
   }
@@ -85,38 +100,54 @@ class _OverlayAppState extends State<_OverlayApp> {
       debugShowCheckedModeBanner: false,
       home: Material(
         color: Colors.transparent,
-        child: Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFF4A90E2),
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: const [
-              BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 2)),
-            ],
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('LateKiller',
-                      style: TextStyle(color: Colors.white70, fontSize: 12)),
-                  Text(_bus,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w700)),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF4A90E2),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: const [
+                  BoxShadow(
+                      color: Colors.black26,
+                      blurRadius: 8,
+                      offset: Offset(0, 2)),
                 ],
               ),
-              Text(_mmss(_sec),
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 36,
-                      fontWeight: FontWeight.w700,
-                      fontFeatures: [FontFeature.tabularFigures()])),
-            ],
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('LateKiller',
+                            style: TextStyle(
+                                color: Colors.white70, fontSize: 13)),
+                        const SizedBox(height: 2),
+                        Text(_bus,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 28,
+                                fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                    const SizedBox(width: 20),
+                    Text(_mmss(_sec),
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 40,
+                            fontWeight: FontWeight.w700,
+                            fontFeatures: [FontFeature.tabularFigures()])),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
       ),

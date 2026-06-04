@@ -4,6 +4,9 @@ import 'package:xml/xml.dart';
 import '../config.dart';
 import '../models/bus_stop.dart';
 import '../models/bus_route.dart';
+// === MOCK BEGIN === (제거 시 이 import 함께 삭제)
+import 'mock_bus_data.dart';
+// === MOCK END ===
 
 /// 인천광역시 버스정보 OpenAPI 래퍼 (공식 스펙 기준).
 /// - 응답 wrapper: <itemList>, 필드명은 대문자.
@@ -62,6 +65,17 @@ class BusApi {
   /// 정류장의 모든 버스 도착시간 — 응답엔 ROUTENO가 없으므로
   /// getBusStationViaRouteList로 받은 노선명과 머지한다.
   Future<List<BusRoute>> getAllRouteBusArrivalList(String stopId) async {
+    // === MOCK BEGIN ===
+    if (MockBusData.enabled) {
+      List<BusRoute> routes;
+      try {
+        routes = await getBusStationViaRouteList(stopId);
+      } catch (_) {
+        routes = [];
+      }
+      return MockBusData.mockRoutes(routes);
+    }
+    // === MOCK END ===
     final routes = await getBusStationViaRouteList(stopId);
     final nameById = {for (final r in routes) r.routeId: r.busNumber};
 
@@ -87,6 +101,14 @@ class BusApi {
 
   /// 특정 정류장+노선 도착시간
   Future<int> getBusArrivalList(String stopId, String routeId) async {
+    // === MOCK BEGIN ===
+    if (MockBusData.enabled) {
+      final t = MockBusData.arrivalSeconds(routeId);
+      // ignore: avoid_print
+      print('[MOCK:getBusArrivalList] routeId=$routeId → ${t}s');
+      return t;
+    }
+    // === MOCK END ===
     final url =
         '$kBusApiBase/getBusArrivalList?serviceKey=$kBusServiceKey&bstopId=${_enc(stopId)}&routeId=${_enc(routeId)}&numOfRows=10&pageNo=1';
     final doc = await _get(url);

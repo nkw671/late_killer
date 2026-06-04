@@ -122,20 +122,22 @@ void main() {
     expect(r.busArriveTime, 0);
   });
 
-  group('[REQ-18] shouldAnnounceNow', () {
+  group('[REQ-18] shouldAnnounceNow (남은시간 기준)', () {
     final al = _mk(walkSec: 60, cs: []);
-    test('>=10분 → 5분 배수 분의 0초에만 true', () {
-      expect(al.shouldAnnounceNow(700, DateTime(2026, 1, 1, 10, 5, 0)), true);
-      expect(al.shouldAnnounceNow(700, DateTime(2026, 1, 1, 10, 6, 0)), false);
-      expect(al.shouldAnnounceNow(700, DateTime(2026, 1, 1, 10, 5, 30)), false);
+    final t = DateTime(2026, 1, 1, 10, 0, 0); // 벽시계 무관
+    test('>=10분 → 5분 배수 정각에만 true', () {
+      expect(al.shouldAnnounceNow(600, t), true);   // 10분
+      expect(al.shouldAnnounceNow(900, t), true);   // 15분
+      expect(al.shouldAnnounceNow(660, t), false);  // 11분
+      expect(al.shouldAnnounceNow(615, t), false);  // 10분15초
     });
     test('<10분 → 매 분 정각에 true', () {
-      expect(al.shouldAnnounceNow(300, DateTime(2026, 1, 1, 10, 7, 0)), true);
-      expect(al.shouldAnnounceNow(300, DateTime(2026, 1, 1, 10, 7, 15)), false);
+      expect(al.shouldAnnounceNow(540, t), true);   // 9분
+      expect(al.shouldAnnounceNow(480, t), true);   // 8분
+      expect(al.shouldAnnounceNow(60, t), true);    // 1분
+      expect(al.shouldAnnounceNow(535, t), false);  // 8분55초
     });
-    test('remaining<=0 → false', () {
-      expect(al.shouldAnnounceNow(0, DateTime(2026, 1, 1, 10, 0, 0)), false);
-    });
+    test('remaining<=0 → false', () => expect(al.shouldAnnounceNow(0, t), false));
   });
 
   test('[REQ-19/20] 출발 TTS 메시지에 노선번호와 분 포함', () async {

@@ -18,6 +18,7 @@ class AlarmActiveScreen extends StatefulWidget {
 }
 
 class _AlarmActiveScreenState extends State<AlarmActiveScreen>
+    with WidgetsBindingObserver
     implements Observer {
   late DepartureAlarm _alarm;
   late List<BusRoute> _candidates;
@@ -26,6 +27,7 @@ class _AlarmActiveScreenState extends State<AlarmActiveScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _tts = PlayTTS();
     _candidates = widget.allRoutes
         .where((r) => widget.config.busNumbers.contains(r.busNumber))
@@ -43,17 +45,41 @@ class _AlarmActiveScreenState extends State<AlarmActiveScreen>
     }
     _alarm.selectEarliestBus();
     _alarm.callAPI();
-    FloatingOverlay().show();
+    // 플로팅은 앱이 백그라운드일 때만 표시 — 권한은 미리 받아둔다(포그라운드에서만 다이얼로그 가능)
+    FloatingOverlay().ensurePermission();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     for (final r in _candidates) {
       r.events.unsubscribe(this);
     }
     _alarm.stopAlarm();
     FloatingOverlay().hide();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+        FloatingOverlay().show().then((_) {
+          final sel = _alarm.selectedBus;
+          if (sel != null) {
+            FloatingOverlay().update(sel.busNumber, sel.busArriveTime);
+          }
+        });
+        break;
+      case AppLifecycleState.resumed:
+        FloatingOverlay().hide();
+        break;
+      case AppLifecycleState.detached:
+        FloatingOverlay().hide();
+        break;
+    }
   }
 
   @override

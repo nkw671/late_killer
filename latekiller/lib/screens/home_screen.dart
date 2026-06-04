@@ -6,6 +6,7 @@ import '../services/bus_api.dart';
 import '../services/stop_csv.dart';
 import 'search_result_screen.dart';
 import 'stop_detail_screen.dart';
+import 'alarm_setup_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -141,13 +142,47 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
 
+  static const _dayLabels = ['월', '화', '수', '목', '금', '토', '일'];
+
+  /// 활성 요일/시간을 같은 시간끼리 묶어서 "월·수·금 08:00 · 화 09:30" 형태로.
+  String _scheduleSummary(AlarmConfig a) {
+    final byTime = <String, List<String>>{};
+    for (var d = 1; d <= 7; d++) {
+      final s = a.schedules[d];
+      if (s == null || !s.isEnabled) continue;
+      final hhmm =
+          '${s.alarmTime.hour.toString().padLeft(2, '0')}:${s.alarmTime.minute.toString().padLeft(2, '0')}';
+      byTime.putIfAbsent(hhmm, () => []).add(_dayLabels[d - 1]);
+    }
+    if (byTime.isEmpty) return '비활성';
+    final entries = byTime.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    return entries.map((e) => '${e.value.join('·')} ${e.key}').join(' · ');
+  }
+
   Widget _alarmCard(AlarmConfig a) => Card(
         child: ListTile(
           contentPadding:
-              const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
           title: Text(a.stopName,
               style: const TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: Text(a.busNumbers.join(', ')),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 4),
+              Text(_scheduleSummary(a),
+                  style: const TextStyle(
+                      color: Color(0xFF4A90E2),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13)),
+              const SizedBox(height: 2),
+              Text(a.busNumbers.join(', '),
+                  style: const TextStyle(
+                      color: Color(0xFF6B7280), fontSize: 12)),
+            ],
+          ),
+          isThreeLine: true,
+          onTap: () => _editAlarm(a),
           trailing: IconButton(
             icon: const Icon(Icons.delete_outline),
             onPressed: () async {
@@ -158,6 +193,34 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       );
+
+  Future<void> _editAlarm(AlarmConfig a) async {
+    final idx = _alarms.indexOf(a);
+    if (idx < 0) return;
+    final stop = BusStop(
+      stopId: a.stopId,
+      stopName: a.stopName,
+      stopNumber: a.stopNumber,
+    );
+    try {
+      final routes = await BusApi().getAllRouteBusArrivalList(a.stopId);
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AlarmSetupScreen(
+            stop: stop,
+            allRoutes: routes,
+            existing: a,
+            existingIndex: idx,
+          ),
+        ),
+      );
+      _load();
+    } catch (e) {
+      _toast('노선 정보 조회 실패: $e');
+    }
+  }
 
   Widget _favCard(BusStop s) => Card(
         child: ListTile(

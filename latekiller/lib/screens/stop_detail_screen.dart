@@ -26,14 +26,18 @@ class _StopDetailScreenState extends State<StopDetailScreen> {
   }
 
   Future<void> _load() async {
+    // 즐겨찾기 상태는 API 성공/실패와 무관하게 항상 먼저 반영
+    final favs = await _storage.loadFavorites();
+    final isFav = favs.any((f) => f.stopId == widget.stop.stopId);
+    if (!mounted) return;
+    setState(() => _isFav = isFav);
+
     try {
       final routes =
           await BusApi().getAllRouteBusArrivalList(widget.stop.stopId);
-      final favs = await _storage.loadFavorites();
       if (!mounted) return;
       setState(() {
         _routes = routes;
-        _isFav = favs.any((f) => f.stopId == widget.stop.stopId);
         _loading = false;
       });
     } catch (e) {
@@ -48,7 +52,7 @@ class _StopDetailScreenState extends State<StopDetailScreen> {
     final favs = await _storage.loadFavorites();
     if (_isFav) {
       favs.removeWhere((f) => f.stopId == widget.stop.stopId);
-    } else {
+    } else if (!favs.any((f) => f.stopId == widget.stop.stopId)) {
       favs.add(widget.stop);
     }
     await _storage.saveFavorites(favs);
@@ -62,14 +66,18 @@ class _StopDetailScreenState extends State<StopDetailScreen> {
     return m > 0 ? '${m}분 ${r}초' : '${r}초';
   }
 
-  void _selectRoute(BusRoute r) {
+  void _openAlarmSetup() {
+    if (_routes.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('경유 노선이 없어요')));
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => AlarmSetupScreen(
           stop: widget.stop,
           allRoutes: _routes,
-          initiallySelected: r,
         ),
       ),
     );
@@ -92,32 +100,51 @@ class _StopDetailScreenState extends State<StopDetailScreen> {
           ? const Center(child: CircularProgressIndicator())
           : _routes.isEmpty
               ? const Center(child: Text('경유 노선이 없어요'))
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: _routes.length,
-                  itemBuilder: (_, i) {
-                    final r = _routes[i];
-                    return Card(
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 20, vertical: 10),
-                        leading: CircleAvatar(
-                          backgroundColor: const Color(0xFFE0EAFC),
-                          child: Text(r.busNumber,
-                              style: const TextStyle(
-                                  color: Color(0xFF4A90E2),
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 12)),
-                        ),
-                        title: Text(r.busNumber,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600)),
-                        subtitle: Text(_fmt(r.busArriveTime)),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => _selectRoute(r),
+              : Column(
+                  children: [
+                    Expanded(
+                      child: ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        itemCount: _routes.length,
+                        itemBuilder: (_, i) {
+                          final r = _routes[i];
+                          return Card(
+                            child: ListTile(
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 20, vertical: 10),
+                              leading: CircleAvatar(
+                                backgroundColor: const Color(0xFFE0EAFC),
+                                child: Text(r.busNumber,
+                                    style: const TextStyle(
+                                        color: Color(0xFF4A90E2),
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 12)),
+                              ),
+                              title: Text(r.busNumber,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w600)),
+                              subtitle: Text(_fmt(r.busArriveTime)),
+                            ),
+                          );
+                        },
                       ),
-                    );
-                  },
+                    ),
+                    SafeArea(
+                      top: false,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                        child: FilledButton(
+                          onPressed: _openAlarmSetup,
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(56),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16)),
+                          ),
+                          child: const Text('정류장 선택'),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
     );
   }

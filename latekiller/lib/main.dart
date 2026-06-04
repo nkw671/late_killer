@@ -11,6 +11,7 @@ import 'theme.dart';
 void overlayMain() => floatingOverlayMain();
 
 final navigatorKey = GlobalKey<NavigatorState>();
+final scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,6 +30,7 @@ class LateKillerApp extends StatelessWidget {
       title: 'LateKiller',
       theme: kAppTheme,
       navigatorKey: navigatorKey,
+      scaffoldMessengerKey: scaffoldMessengerKey,
       home: const HomeScreen(),
       debugShowCheckedModeBanner: false,
     );

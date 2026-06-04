@@ -67,7 +67,19 @@ class DepartureAlarm implements Observer {
   }
 
   void callAPI() {
-    _refresh();
+    // 첫 API 응답 도착 후 알람 시작 안내 + 선택 버스 남은시간 1회 발화
+    _refresh().then((_) {
+      final s = selectedBus;
+      if (s == null || s.busArriveTime <= 0) {
+        tts.speakMessage('알람을 시작합니다');
+        return;
+      }
+      final m = s.busArriveTime ~/ 60;
+      final tail = m > 0
+          ? '${s.busNumber}번 버스 약 $m분 후 도착'
+          : '${s.busNumber}번 버스 곧 도착';
+      tts.speakMessage('알람을 시작합니다. $tail');
+    });
     _apiTimer?.cancel();
     // REQ-15: 1분 간격 API polling
     _apiTimer = Timer.periodic(const Duration(seconds: 60), (_) => _refresh());
@@ -107,12 +119,13 @@ class DepartureAlarm implements Observer {
     selectEarliestBus();
   }
 
-  /// REQ-18: 벽시계 기준 — 남은시간이 10분 이상이면 분 단위가 5의 배수일 때,
-  /// 미만이면 매 분 정각(초=0)에 안내한다.
+  /// REQ-18: 남은시간 기준 — 남은시간이 분 정각(예: 9분 0초)에 도달할 때 안내.
+  /// 10분 이상: 5분 간격(10·15·20…분).
+  /// 10분 미만: 1분 간격(9·8·7…분).
   bool shouldAnnounceNow(int remainingTime, DateTime now) {
     if (remainingTime <= 0) return false;
-    if (now.second != 0) return false;
-    if (remainingTime >= 600) return now.minute % 5 == 0;
+    if (remainingTime % 60 != 0) return false;
+    if (remainingTime >= 600) return remainingTime % 300 == 0;
     return true;
   }
 
