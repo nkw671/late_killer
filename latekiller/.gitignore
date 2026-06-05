@@ -43,3 +43,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local secrets / IDE에 저장된 dart-define 값
+.env
+.env.local
+env.json
+**/secrets.dart
+.vscode/launch.json
