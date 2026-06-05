@@ -7,7 +7,7 @@ import '../models/bus_route.dart';
 
 class MockBusData {
   /// 끄려면 false. 파일 삭제 시 더 이상 import 안 됨.
-  static const bool enabled = true;
+  static const bool enabled = false;
 
   static final Map<String, DateTime> _firstSeen = {};
 

@@ -4,12 +4,20 @@ Flutter 기반 인천 버스 도착 알림 앱. 정류장까지 도보 시간을
 
 ## 실행
 
-```bash
-flutter pub get
-flutter run
-```
+1. 프로젝트 루트에 `env.json` 생성 (gitignore됨):
+   ```json
+   { "BUS_SERVICE_KEY": "발급받은_URL_디코딩값" }
+   ```
+2. 실행/빌드:
+   ```bash
+   flutter pub get
+   flutter run --dart-define-from-file=env.json
+   flutter build apk --dart-define-from-file=env.json
+   ```
 
-`lib/config.dart`의 `kBusServiceKey`에 공공데이터포털 인천광역시 버스정보 ServiceKey(URL 디코딩된 값)를 넣어야 동작한다.
+VS Code에선 `.vscode/launch.json`(gitignore됨)이 자동으로 `env.json`을 읽어 F5만 누르면 된다.
+
+**키를 코드에 하드코딩하지 말 것** — `lib/config.dart`의 `kBusServiceKey`는 `String.fromEnvironment('BUS_SERVICE_KEY')`로 빌드 시 주입받는다. 미설정 시 빈 문자열로 API 호출이 실패하며 콘솔에 경고가 찍힌다.
 
 ## 프로젝트 구조
 
@@ -33,9 +41,13 @@ lib/
 │   ├── storage.dart             # SharedPreferences (즐겨찾기/알람 저장)
 │   ├── alarm_scheduler.dart     # 저장된 알람의 요일/시각 도래 시 AlarmActiveScreen 자동 진입 (30초 polling)
 │   ├── floating_overlay.dart    # 시스템 오버레이 윈도우 (백그라운드 시 표시)
-│   └── mock_bus_data.dart       # ⚠ 테스트용 mock 도착시간. 끝나면 파일 + bus_api.dart의 MOCK 마커 삭제
-├── core/
-│   └── departure_alarm.dart     # 알람 엔진: 1초 tick + 60초 API polling, 임계시간 도달 알림/TTS
+│   └── mock_bus_data.dart       # ⚠ 테스트용 mock 도착시간 (현재 enabled=false). 완전 제거 시 파일 + bus_api.dart MOCK 마커 삭제
+├── core/                        # 알람 엔진 (DepartureAlarm 책임 분리)
+│   ├── departure_alarm.dart     # 조정자(Coordinator): 버스 선택 + 하위 컴포넌트 조립
+│   ├── bus_poller.dart          # API polling(60s) + 1초 tick + 버스 통과 감지(onBusPassed)
+│   ├── threshold_announcer.dart # REQ-11 임계시간 1회 발화 (maybeFire/reset)
+│   ├── periodic_announcer.dart  # REQ-18 남은시간 기준 주기 안내 (shouldAnnounceNow)
+│   └── start_announcer.dart     # 알람 시작 시 1회 안내 ("알람을 시작합니다. X번 약 N분 후 도착")
 └── screens/
     ├── home_screen.dart         # 검색창 + 설정한 알람(탭→편집) + 즐겨찾기
     ├── search_result_screen.dart  # 이름 검색 결과
@@ -61,18 +73,23 @@ lib/
 4. **알람 자동 실행**: `AlarmScheduler`가 30초 주기로 검사. 활성 요일·시각 매치 시 `navigatorKey`로 `AlarmActiveScreen` push. 같은 분 내 중복 발화 방지(dateKey 기반 `_fired` 셋)
 5. **알람 화면**: `DepartureAlarm` 동작 + 백그라운드(`paused/inactive/hidden`) 진입 시에만 플로팅 표시, 복귀(`resumed`) 시 숨김
 
-## 알람 동작 (DepartureAlarm)
+## 알람 동작 (DepartureAlarm + 하위 컴포넌트)
 
-1. 후보 노선들을 1초 tick + 60초 API polling
-2. 매 API 호출 시 `correctArriveTime`으로 카운트다운 갱신. `before <= 30 && api >= 120`이면 "버스 통과"로 간주, `_alertedThreshold` 리셋
-3. `selectEarliestBus`로 가장 이른 노선을 선택 버스로 지정
-4. **출발 임계시간(`busArriveTime <= walkTimeToStop`) 도달 시 1회**만 `notif.showDeparture` + `tts.speakMessage('지금 출발하세요')`
-5. 임계 이후엔 **남은시간 기준 주기 안내** ([REQ-18](#)):
+`DepartureAlarm`은 조정자(coordinator)로 슬림화. 실제 동작은 4개 컴포넌트가 분담:
+
+1. **`BusPoller`** — 후보 노선들을 1초 tick + 60초 API polling
+   - 매 API 호출 시 `correctArriveTime`으로 카운트다운 갱신
+   - `before <= 30 && api >= 120`이면 "버스 통과" → `onBusPassed` 콜백 (Coordinator가 임계 리셋)
+   - 매 refresh 끝에 `onRefreshed` 콜백 → Coordinator의 `selectEarliestBus` 호출 (순위 변동 반영)
+2. **Coordinator (`DepartureAlarm`)** — `selectEarliestBus`로 가장 이른 노선을 선택 버스로 지정
+3. **`StartAnnouncer`** — 첫 API 응답 후 1회 발화: `"알람을 시작합니다. X번 버스 약 N분 후 도착"` (도착정보 없으면 `"알람을 시작합니다"`만)
+4. **`ThresholdAnnouncer`** — 출발 임계시간(`busArriveTime <= walkTimeToStop`) 도달 시 **1회만** `tts.speakMessage` + `notif.showDeparture` ([REQ-11](#))
+5. **`PeriodicAnnouncer`** — 임계 이후 **남은시간 기준 주기 안내** ([REQ-18](#))
    - 10분 이상 → 5분 배수 정각(15분 0초·20분 0초…)
    - 10분 미만 → 매 분 정각(9분 0초·8분 0초…)
-   - `shouldAnnounceNow(remainingTime, now)`: `remainingTime > 0 && remainingTime % 60 == 0` 가드
-6. 새 버스 선택 / 통과 감지 시 `_alertedThreshold` 플래그 리셋
-7. **TTS/알림은 옵저버 미등록** — `DepartureAlarm.update`가 직접 호출 (이중 발화 방지)
+   - `shouldAnnounceNow`: `remainingTime > 0 && remainingTime % 60 == 0` 가드
+6. 새 버스 선택(`selectEarliestBus`/`switchToNextEarliestBus`) 또는 통과 감지 시 `ThresholdAnnouncer.reset()`
+7. **TTS/알림은 옵저버 미등록** — Coordinator의 `update`가 ThresholdAnnouncer → PeriodicAnnouncer 순으로 위임 (이중 발화 방지)
 
 ## 플로팅 오버레이 (FloatingOverlay)
 
@@ -90,7 +107,7 @@ lib/
 - **알람 동작 범위**: 현재 `AlarmScheduler`는 Dart `Timer` 기반. **앱 프로세스가 살아있는 동안만** 동작. 작업관리자 스와이프/OS 강제 종료/재부팅 후엔 동작 안 함 (시중 알람앱 수준 보장 필요 시 `android_alarm_manager_plus` + 매니페스트 권한 추가 필요)
 - **편집 모드 식별**: `AlarmSetupScreen`은 `existing: AlarmConfig?` + `existingIndex: int?`로 신규/편집 분기. 편집 저장 시 인덱스 위치 교체, 신규는 append
 - **즐겨찾기 중복 방지**: `_toggleFav` 추가 경로에 `!favs.any((f) => f.stopId == widget.stop.stopId)` 가드. `_load`는 API 실패와 무관하게 `_isFav`를 먼저 반영
-- **MOCK 데이터 활성 상태**: [mock_bus_data.dart](lib/services/mock_bus_data.dart)의 `MockBusData.enabled = true`로 도착시간이 가짜다 (defaultInitial 1200초=20분, 회전 cycle). 끄려면 `enabled = false`. 완전 제거는 mock 파일 삭제 + [bus_api.dart](lib/services/bus_api.dart) 내 `// === MOCK BEGIN ===` ~ `END` 블록 3개 제거
+- **MOCK 데이터**: [mock_bus_data.dart](lib/services/mock_bus_data.dart)의 `MockBusData.enabled = false` (현재 비활성, 실 API 사용). 다시 켜려면 `enabled = true` (defaultInitial 1200초=20분, 회전 cycle). 완전 제거는 mock 파일 삭제 + [bus_api.dart](lib/services/bus_api.dart) 내 `// === MOCK BEGIN ===` ~ `END` 블록 3개 제거
 
 ## 의존성 (pubspec.yaml)
 
@@ -102,7 +119,7 @@ lib/
 flutter test test/srs_test.dart
 ```
 
-`test/srs_test.dart` — SRS 24개 요구사항 중 단위 테스트 가능 항목(REQ-10/11/12/13/17/18/19/20/21/22) 자동 검증.
+`test/srs_test.dart` — SRS 24개 요구사항 중 단위 테스트 가능 항목(REQ-10/11/12/13/17/18/19/20/21/22) 자동 검증. **13/13 통과**.
 
 ## 작업 원칙
 

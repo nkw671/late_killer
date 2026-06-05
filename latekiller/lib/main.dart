@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'config.dart';
 import 'screens/home_screen.dart';
 import 'services/alarm_scheduler.dart';
 import 'services/floating_overlay.dart';
@@ -15,6 +16,11 @@ final scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (kBusServiceKey.isEmpty) {
+    // ignore: avoid_print
+    print('[WARN] BUS_SERVICE_KEY 미설정 — '
+        'flutter run --dart-define=BUS_SERVICE_KEY=xxx 로 주입 필요');
+  }
   await StopCsv().load();
   await LockNotification().init();
   AlarmScheduler().start(navigatorKey);
