@@ -92,7 +92,4 @@
 
 <img width="533" height="1056" alt="Image" src="https://github.com/user-attachments/assets/bea07a31-e96a-4879-afbf-d7596b851dc2" />
 <Br>
-# 코딩
-# 응집 / 결합 / Solid 분석
-# 품질 분석
-# 결과
+
