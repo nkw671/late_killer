@@ -1,28 +1,32 @@
-import 'dart:async';
 import '../models/alarm_schedule.dart';
 import '../models/bus_route.dart';
-import '../services/bus_api.dart';
 import '../services/event_manager.dart';
-import '../services/tts.dart';
 import '../services/notification.dart';
+import '../services/tts.dart';
+import 'bus_poller.dart';
+import 'periodic_announcer.dart';
+import 'start_announcer.dart';
+import 'threshold_announcer.dart';
 
-/// 알람 실행 엔진.
-/// - 후보 노선들을 1초 tick + 30초 API polling으로 추적
-/// - 매 tick은 UI 갱신용으로만 사용 (옵저버 통지)
-/// - TTS/알림은 DepartureAlarm이 직접 제어 (주기/임계 이벤트 시에만)
+/// 알람 조정자 (Coordinator).
+/// - 후보 노선 중 가장 이른 버스를 선택해 추적
+/// - [BusPoller]로 폴링, [ThresholdAnnouncer]로 출발 알림,
+///   [PeriodicAnnouncer]로 주기 안내, [StartAnnouncer]로 시작 안내
+/// - 자기 자신만 후보들을 옵저버로 구독해 매 tick마다 판정
 class DepartureAlarm implements Observer {
-  int walkTimeToStop; // 초
-  int thresholdTime = 0;
-  final Map<int, AlarmSchedule> schedules;
+  final int walkTimeToStop; // 초
   final String stopId;
   final List<BusRoute> candidates;
   final PlayTTS tts;
   final LockNotification notif;
+  final Map<int, AlarmSchedule> schedules;
+
+  late final BusPoller _poller;
+  late final ThresholdAnnouncer _threshold;
+  late final PeriodicAnnouncer _periodic;
+  late final StartAnnouncer _start;
 
   BusRoute? selectedBus;
-  Timer? _apiTimer;
-  Timer? _tickTimer;
-  bool _alertedThreshold = false;
 
   DepartureAlarm({
     required this.walkTimeToStop,
@@ -32,11 +36,25 @@ class DepartureAlarm implements Observer {
     required this.notif,
     Map<int, AlarmSchedule>? schedules,
   }) : schedules = schedules ?? {} {
+    _threshold = ThresholdAnnouncer(tts: tts, notif: notif);
+    _periodic = PeriodicAnnouncer(tts: tts);
+    _start = StartAnnouncer(tts: tts);
+    _poller = BusPoller(
+      candidates: candidates,
+      stopId: stopId,
+      onBusPassed: (passed) {
+        // 통과한 버스가 현재 선택 버스라면 다음 인스턴스에 다시 발화 가능하도록 리셋
+        if (identical(passed, selectedBus)) _threshold.reset();
+      },
+      // 매 갱신마다 가장 이른 버스 재선택 (REQ-12 순위 변동 반영)
+      onRefreshed: selectEarliestBus,
+    );
     for (final r in candidates) {
-      r.events.subscribe(this); // UI 갱신용 (자기 자신만 구독)
+      r.events.subscribe(this);
     }
   }
 
+  /// 가장 이른(도착시간 > 0) 버스를 선택. 새 버스 선택 시 임계 플래그 리셋.
   void selectEarliestBus() {
     if (candidates.isEmpty) return;
     candidates.sort((a, b) => a.busArriveTime.compareTo(b.busArriveTime));
@@ -46,10 +64,11 @@ class DepartureAlarm implements Observer {
     );
     if (next != selectedBus) {
       selectedBus = next;
-      _alertedThreshold = false; // 새 버스 선택 시 임계 플래그 리셋
+      _threshold.reset();
     }
   }
 
+  /// 다음으로 이른 버스로 강제 전환 (REQ-12 시뮬레이션 등).
   void switchToNextEarliestBus() {
     if (candidates.length <= 1) return;
     candidates.sort((a, b) => a.busArriveTime.compareTo(b.busArriveTime));
@@ -58,108 +77,35 @@ class DepartureAlarm implements Observer {
       orElse: () => candidates.first,
     );
     selectedBus = next;
-    _alertedThreshold = false;
+    _threshold.reset();
   }
 
-  int setDepartureThreshold(int walk, int arrive) {
-    thresholdTime = arrive - walk;
-    return thresholdTime;
-  }
-
+  /// 폴링 시작 + 첫 API 응답 후 시작 안내 1회 발화.
+  /// (selectEarliestBus는 onRefreshed 콜백에서 이미 호출됨)
   void callAPI() {
-    // 첫 API 응답 도착 후 알람 시작 안내 + 선택 버스 남은시간 1회 발화
-    _refresh().then((_) {
-      final s = selectedBus;
-      if (s == null || s.busArriveTime <= 0) {
-        tts.speakMessage('알람을 시작합니다');
-        return;
-      }
-      final m = s.busArriveTime ~/ 60;
-      final tail = m > 0
-          ? '${s.busNumber}번 버스 약 $m분 후 도착'
-          : '${s.busNumber}번 버스 곧 도착';
-      tts.speakMessage('알람을 시작합니다. $tail');
-    });
-    _apiTimer?.cancel();
-    // REQ-15: 1분 간격 API polling
-    _apiTimer = Timer.periodic(const Duration(seconds: 60), (_) => _refresh());
-    _tickTimer?.cancel();
-    _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      for (final r in candidates) {
-        r.tick();
-      }
-    });
+    _poller.start();
+    _poller.firstRefreshed.then((_) => _start.announce(selectedBus));
   }
 
-  void stopAPI() {
-    _apiTimer?.cancel();
-    _tickTimer?.cancel();
-  }
-
-  Future<void> _refresh() async {
-    for (final r in candidates) {
-      try {
-        final t = await BusApi().getBusArrivalList(stopId, r.routeId);
-        final before = r.busArriveTime;
-        // 버스 통과 감지: 카운트다운 거의 0인데 API가 새 인스턴스(>=120s) 반환
-        final bool passed = before <= 30 && t >= 120;
-        r.correctArriveTime(t);
-        if (passed && r == selectedBus) {
-          _alertedThreshold = false; // 새 인스턴스에 대해 다시 알림 가능
-        }
-        // ignore: avoid_print
-        print('[API] ${r.busNumber} api=${t}s countdown=${before}s '
-            'diff=${(t - before).abs()}s applied=${r.busArriveTime}s'
-            '${passed ? " [PASSED]" : ""}');
-      } catch (e) {
-        // ignore: avoid_print
-        print('[API] ${r.busNumber} error: $e');
-      }
-    }
-    selectEarliestBus();
-  }
-
-  /// REQ-18: 남은시간 기준 — 남은시간이 분 정각(예: 9분 0초)에 도달할 때 안내.
-  /// 10분 이상: 5분 간격(10·15·20…분).
-  /// 10분 미만: 1분 간격(9·8·7…분).
-  bool shouldAnnounceNow(int remainingTime, DateTime now) {
-    if (remainingTime <= 0) return false;
-    if (remainingTime % 60 != 0) return false;
-    if (remainingTime >= 600) return remainingTime % 300 == 0;
-    return true;
-  }
+  void stopAPI() => _poller.stop();
 
   void stopAlarm() {
-    stopAPI();
+    _poller.stop();
     for (final r in candidates) {
       r.events.unsubscribe(this);
     }
   }
 
+  /// 테스트 호환용 — REQ-18 판정 위임.
+  bool shouldAnnounceNow(int remainingTime, DateTime now) =>
+      _periodic.shouldAnnounceNow(remainingTime, now);
+
   @override
   void update(String busNumber, int busArriveTime) {
     if (selectedBus == null || busNumber != selectedBus!.busNumber) return;
-    setDepartureThreshold(walkTimeToStop, busArriveTime);
-
-    // REQ-11: 임계시간 도달 시 1회만 출발 알림
-    // REQ-20: TTS에 노선번호 + 남은시간(분) 포함
-    // REQ-21/22: 알림에 노선번호 + 예정 도착시각 포함
-    if (!_alertedThreshold &&
-        busArriveTime <= walkTimeToStop &&
-        busArriveTime > 0) {
-      _alertedThreshold = true;
-      final m = busArriveTime ~/ 60;
-      final ttsMsg = m > 0
-          ? '$busNumber번 버스 $m분 후 도착. 지금 출발하세요'
-          : '$busNumber번 버스 곧 도착. 지금 출발하세요';
-      tts.speakMessage(ttsMsg);
-      notif.showDeparture(busNumber, busArriveTime);
-      return;
-    }
-
-    // REQ-18: 벽시계 정각 기준 주기 안내
-    if (shouldAnnounceNow(busArriveTime, DateTime.now())) {
-      tts.speak(busNumber, busArriveTime);
-    }
+    // 우선 임계 발화 시도 (1회만 true 반환)
+    if (_threshold.maybeFire(busNumber, busArriveTime, walkTimeToStop)) return;
+    // 임계 이후엔 주기 안내
+    _periodic.maybeAnnounce(busNumber, busArriveTime, DateTime.now());
   }
 }
